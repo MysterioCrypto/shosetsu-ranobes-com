@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.6","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.7","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -99,16 +99,19 @@ end
 local function urlEncode(str) str = tostring(str or ""):gsub("\n", " "); return str:gsub("([^%w%-_%.~])", function(c) return string.format("%%%02X", string.byte(c)) end) end
 local function pageFromData(data) if data and data[PAGE] then return tonumber(data[PAGE]) or 1 end return 1 end
 local function buildCatalogURL(data) local p = pageFromData(data); if p <= 1 then return baseURL .. "/ranobe/" end; return baseURL .. "/ranobe/page/" .. p .. "/" end
+local function searchURL(query, page)
+    local enc = urlEncode(query)
+    local url = baseURL .. "/f/cat=1/l.title=" .. enc .. "/sort=date/order=desc/"
+    if page and page > 1 then url = url .. "page/" .. page .. "/" end
+    return url
+end
 local function buildSearchURLs(data)
-    local p = pageFromData(data); local raw = queryFromData(data); if raw == "" then return {} end; local enc = urlEncode(raw)
+    local p = pageFromData(data); local raw = queryFromData(data); if raw == "" then return {} end
+    local enc = urlEncode(raw)
     return {
-        baseURL .. "/search/" .. enc .. "/page/" .. p,
-        baseURL .. "/search/" .. raw .. "/page/" .. p,
-        baseURL .. "/ranobe/l.title=" .. enc .. "/sort=date/order=desc/page/" .. p .. "/",
-        baseURL .. "/ranobe/l.title=" .. raw .. "/sort=date/order=desc/page/" .. p .. "/",
-        baseURL .. "/f/l.title=" .. enc .. "/sort=date/order=desc/page/" .. p,
-        baseURL .. "/f/l.title=" .. raw .. "/sort=date/order=desc/page/" .. p,
-        baseURL .. "/ranobe/"
+        searchURL(raw, p),
+        baseURL .. "/f/l.title=" .. enc .. "/sort=date/order=desc/",
+        baseURL .. "/search/" .. enc .. "/page/" .. p
     }
 end
 
@@ -139,7 +142,7 @@ local function parseListingURL(url) return parseListingURLInternal(url, true, ""
 local function search(data)
     local raw = queryFromData(data); if raw == "" then return makeDebugNovel("empty query", "Shosetsu did not pass QUERY to extension") end
     local last = ""
-    for _, url in ipairs(buildSearchURLs(data)) do local novels, reason = parseListingURLInternal(url, false, raw, true); if #novels > 0 then return novels end; last = last .. " | " .. tostring(reason) end
+    for _, url in ipairs(buildSearchURLs(data)) do local novels, reason = parseListingURLInternal(url, false, raw, false); if #novels > 0 then return novels end; last = last .. " | " .. tostring(reason) end
     return makeDebugNovel("search failed", last)
 end
 

@@ -1,8 +1,7 @@
--- {"id":962041,"ver":"1.0.10","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.11","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
-local requestCount = 0
 
 local function trim(s)
     if not s then return "" end
@@ -56,8 +55,19 @@ local function urlEncode(str)
     end)
 end
 
+local function urlDecode(str)
+    str = tostring(str or "")
+    return str:gsub("%%(%x%x)", function(hex)
+        return string.char(tonumber(hex, 16))
+    end)
+end
+
 local function pageFromData(data)
-    if data and data[PAGE] then return tonumber(data[PAGE]) or 1 end
+    if not data then return 1 end
+    if PAGE and data[PAGE] then return tonumber(data[PAGE]) or 1 end
+    if data["page"] then return tonumber(data["page"]) or 1 end
+    if data["PAGE"] then return tonumber(data["PAGE"]) or 1 end
+    if data["p"] then return tonumber(data["p"]) or 1 end
     return 1
 end
 
@@ -68,16 +78,11 @@ local function queryFromData(data)
     if q == "" and data["query"] then q = data["query"] end
     if q == "" and data["QUERY"] then q = data["QUERY"] end
     if q == "" and data["q"] then q = data["q"] end
-    return trim(q)
+    return trim(urlDecode(q))
 end
 
 local function waitBeforeRequest(isSearch)
-    requestCount = requestCount + 1
-    if isSearch then
-        delay(math.random(900, 1800))
-    else
-        delay(math.random(1300, 2800))
-    end
+    if isSearch then delay(math.random(900, 1800)) else delay(math.random(1300, 2800)) end
 end
 
 local function safeFetch(url, soft)
@@ -86,14 +91,12 @@ local function safeFetch(url, soft)
         if soft then return nil, tostring(doc) end
         error(tostring(doc))
     end
-
     local title = textOf(doc:selectFirst("title"))
     local body = textOf(doc)
     if title == "Error" or title == "Ranobes Flood Guard" or title == "Just a moment..." or title:find("Антибот") or body:find("подозрительную активность") or body:find("Ranobes Flood Guard") then
         if soft then return nil, "verification page: " .. title end
         error("Verification page detected. Open WebView/browser and retry.")
     end
-
     return doc, nil
 end
 
@@ -119,6 +122,7 @@ end
 
 local function cleanTitle(title)
     title = trim(title)
+    title = title:gsub("&quot;", "\"")
     title = title:gsub("%s+Более%s+[%d%s]+%s+просмотров.*$", "")
     title = title:gsub("%s+Китайский;.*$", "")
     title = title:gsub("%s+Корейский;.*$", "")
@@ -140,19 +144,16 @@ local function cardImage(card)
     local fig = first(card, { "figure.cover", ".cover" })
     local u = imageFromStyle(attrOf(fig, "style"))
     if u ~= "" then return u end
-
     local img = first(card, { "img" })
     local src = attrOf(img, "data-src")
     if src == "" then src = attrOf(img, "src") end
     if src ~= "" then return normalizeURL(src) end
-
     return imageURL
 end
 
 local function findCardTitleLink(card)
     local a = first(card, { "h2.title a", ".title a", "h2 a", "h3 a" })
     if a and isNovelHref(attrOf(a, "href")) and textOf(a) ~= "" then return a end
-
     local links = card:select("a")
     for i = 1, links:size() do
         local link = links:get(i - 1)
@@ -167,12 +168,10 @@ local function addNovel(out, seen, title, href, img, query)
     if title == "" or href == "" then return end
     if title == "Читать" or title == "Закладка" or title == "Ранобэ" or title == "Ранобэс" then return end
     if not isNovelHref(href) then return end
-    if not queryMatches(title, href, query or "") then return end
-
+    if query ~= nil and query ~= "" and not queryMatches(title, href, query) then return end
     local link = shrinkURL(href)
     if seen[link] then return end
     seen[link] = true
-
     table.insert(out, Novel({ title = title, link = link, imageURL = img or imageURL }))
 end
 
@@ -180,17 +179,14 @@ local function parseCards(root, query)
     local out = {}
     local seen = {}
     if not root then return out end
-
     local cards = root:select("article")
     if cards:size() == 0 then cards = root:select(".shortstory") end
     if cards:size() == 0 then cards = root:select(".story") end
-
     for i = 1, cards:size() do
         local card = cards:get(i - 1)
         local a = findCardTitleLink(card)
         addNovel(out, seen, textOf(a), attrOf(a, "href"), cardImage(card), query or "")
     end
-
     return out
 end
 
@@ -200,10 +196,19 @@ local function catalogURL(data)
     return baseURL .. "/ranobe/page/" .. page .. "/"
 end
 
-local function searchURL(query, page)
-    local url = baseURL .. "/f/cat=1/l.title=" .. urlEncode(query) .. "/sort=date/order=desc/"
-    if page and page > 1 then url = url .. "page/" .. page .. "/" end
-    return url
+local function searchURLs(query, page)
+    local enc = urlEncode(query)
+    local urls = {}
+    if page and page > 1 then
+        table.insert(urls, baseURL .. "/search/" .. enc .. "/page/" .. page)
+        table.insert(urls, baseURL .. "/search/" .. query .. "/page/" .. page)
+        table.insert(urls, baseURL .. "/f/cat=1/l.title=" .. enc .. "/sort=date/order=desc/page/" .. page .. "/")
+    else
+        table.insert(urls, baseURL .. "/search/" .. enc .. "/page/1")
+        table.insert(urls, baseURL .. "/search/" .. query .. "/page/1")
+        table.insert(urls, baseURL .. "/f/cat=1/l.title=" .. enc .. "/sort=date/order=desc/")
+    end
+    return urls
 end
 
 local function parseListingURL(url)
@@ -217,17 +222,24 @@ end
 local function search(data)
     local q = queryFromData(data)
     if q == "" then return {} end
-    waitBeforeRequest(true)
-    local doc = safeFetch(searchURL(q, pageFromData(data)), true)
-    if not doc then return {} end
-    local root = doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc
-    return parseCards(root, q)
+    local urls = searchURLs(q, pageFromData(data))
+    for _, url in ipairs(urls) do
+        waitBeforeRequest(true)
+        local doc = safeFetch(url, true)
+        if doc then
+            local root = doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc
+            local out = parseCards(root, q)
+            if #out > 0 then return out end
+        end
+    end
+    return {}
 end
 
 local function cleanChapterTitle(title)
     title = trim(title)
-    title = title:gsub("%s+%d%d?%s+[А-Яа-яЁё]+%s+%d%d%d%d%s+в.*$", "")
-    title = title:gsub("%s+%d%d?%s+[А-Яа-яЁё]+%s+%d%d%d%d.*$", "")
+    title = title:gsub("&quot;", "\"")
+    title = title:gsub("%s+%d%d?%s+%S+%s+20%d%d.*$", "")
+    title = title:gsub("%s+%d%d?%.%d%d%.20%d%d.*$", "")
     return trim(title)
 end
 
@@ -298,10 +310,8 @@ local function findChapterIndexUrl(doc, novelURL)
         local href = attrOf(links:get(i - 1), "href")
         if href:find("/chapters/") and not href:find("%.html") then return normalizeURL(href) end
     end
-
     local slug = shrinkURL(novelURL):match("/ranobe/%d+%-([^/%.]+)%.html")
     if slug and slug ~= "" then return baseURL .. "/chapters/" .. slug .. "/" end
-
     error("Chapter index URL not found.")
 end
 
@@ -325,7 +335,6 @@ local function parseChapters(doc)
     local links = root:select("a")
     local out = {}
     local seen = {}
-
     for i = links:size(), 1, -1 do
         local a = links:get(i - 1)
         local href = attrOf(a, "href")
@@ -335,24 +344,19 @@ local function parseChapters(doc)
             table.insert(out, NovelChapter({ order = chapterOrder(title, href, #out + 1), title = title, link = shrinkURL(href) }))
         end
     end
-
     return out
 end
 
 local function parseNovel(novelURL, loadChapters)
     local fullURL = expandURL(novelURL)
     local doc = safeFetch(fullURL)
-
     local titleNode = first(doc, { 'meta[property="og:title"]', "h1.title", "h1" })
     local title = attrOf(titleNode, "content")
     if title == "" then title = textOf(titleNode) end
-
     local altTitle = textOf(first(doc, { "h1.title span.subtitle", ".subtitle" }))
-
     local imgURL = attrOf(first(doc, { "a.highslide", 'meta[property="og:image"]' }), "href")
     if imgURL == "" then imgURL = attrOf(first(doc, { 'meta[property="og:image"]' }), "content") end
     if imgURL == "" then imgURL = imageURL end
-
     local desc = htmlToString(first(doc, { ".moreless.cont-text.showcont-h", ".cont-text.showcont-h", ".full-text", "#dle-content .text" }))
 
     local genres = {}
@@ -405,7 +409,6 @@ local function parseNovel(novelURL, loadChapters)
         end
         info:setChapters(AsList(chapters))
     end
-
     return info
 end
 

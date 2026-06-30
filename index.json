@@ -1,0 +1,27 @@
+{
+  "authors": [
+    {
+      "id": 144173232,
+      "name": "MysterioCrypto",
+      "desc": "Ranobes.com Russian source for Shosetsu",
+      "imageURL": "",
+      "website": "https://github.com/MysterioCrypto"
+    }
+  ],
+  "libraries": [],
+  "scripts": [
+    {
+      "id": 962041,
+      "name": "Ranobes.com RU",
+      "fileName": "RanobesCom",
+      "imageURL": "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png",
+      "lang": "rus",
+      "ver": "1.0.0",
+      "libVer": "1.0.0",
+      "md5": "",
+      "type": "LuaScript"
+    }
+  ],
+  "styles": [],
+  "js": []
+}

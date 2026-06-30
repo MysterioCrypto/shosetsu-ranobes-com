@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.7","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.8","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -43,7 +43,7 @@ end
 local function makeDebugNovel(title, details)
     local text = "DEBUG: " .. tostring(title or "unknown")
     if details and details ~= "" then text = text .. " — " .. tostring(details) end
-    return { Novel({ title = text, link = "/ranobe/", imageURL = imageURL }) }
+    return { Novel({ title = text, link = "/ranobe/134618-lord-of-the-mysteries.html", imageURL = imageURL }) }
 end
 
 local function ruLower(s)
@@ -105,45 +105,69 @@ local function searchURL(query, page)
     if page and page > 1 then url = url .. "page/" .. page .. "/" end
     return url
 end
-local function buildSearchURLs(data)
-    local p = pageFromData(data); local raw = queryFromData(data); if raw == "" then return {} end
-    local enc = urlEncode(raw)
-    return {
-        searchURL(raw, p),
-        baseURL .. "/f/l.title=" .. enc .. "/sort=date/order=desc/",
-        baseURL .. "/search/" .. enc .. "/page/" .. p
-    }
-end
 
-local function isNovelHref(href) href = shrinkURL(href); return href:find("^/ranobe/%d+%-") ~= nil and href:find("%.html") ~= nil end
+local function isNovelHref(href)
+    href = shrinkURL(href)
+    if href == "/ranobe/" or href == "/ranobe" then return false end
+    return href:find("^/ranobe/%d+%-") ~= nil and href:find("%.html") ~= nil
+end
 local function addNovel(out, seen, title, href, img, query)
     title = cleanTitle(title); href = trim(href)
-    if title == "" or href == "" or title == "Читать" or title == "Закладка" or title == "Ранобэ" then return end
-    if not isNovelHref(href) or not queryMatches(title, href, query or "") then return end
+    if title == "" or href == "" or title == "Читать" or title == "Закладка" or title == "Ранобэ" or title == "Ранобэс" then return end
+    if not isNovelHref(href) then return end
+    if query and query ~= "" and not queryMatches(title, href, query) then return end
     local link = shrinkURL(href); if seen[link] then return end; seen[link] = true
     table.insert(out, Novel({ title = title, link = link, imageURL = img or imageURL }))
 end
 
-local function parseListingURLInternal(url, withDebug, query, wholePage)
+local function parseCatalogURL(url, withDebug)
     randomizedDelay(true)
     local doc, et, em = safeFetch(url, true)
     if not doc then if withDebug then return makeDebugNovel("fetch failed", "url=" .. tostring(url) .. "; type=" .. tostring(et) .. "; msg=" .. tostring(em)) end; return {}, "fetch failed: " .. tostring(et) .. ": " .. tostring(em) end
-    local root = wholePage and doc or (doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc)
+    local root = doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc
     local out = {}; local seen = {}
     local cards = root:select("article, .shortstory, .rank-story, .block.story")
-    for i = 1, cards:size() do local card = cards:get(i - 1); local a = first(card, { "h2 > a[href*='/ranobe/']", "h2 a[href*='/ranobe/']", ".title > a[href*='/ranobe/']", ".title a[href*='/ranobe/']" }); addNovel(out, seen, textOf(a), attrOf(a, "href"), cardImage(card), query) end
-    local links = root:select("h2 > a[href*='/ranobe/'], h2 a[href*='/ranobe/'], .title > a[href*='/ranobe/'], .title a[href*='/ranobe/']")
-    for i = 1, links:size() do local a = links:get(i - 1); addNovel(out, seen, textOf(a), attrOf(a, "href"), imageURL, query) end
-    if wholePage and query and trim(query) ~= "" then local broad = doc:select("a[href*='/ranobe/']"); for i = 1, broad:size() do local a = broad:get(i - 1); addNovel(out, seen, textOf(a), attrOf(a, "href"), imageURL, query) end end
+    for i = 1, cards:size() do
+        local card = cards:get(i - 1)
+        local a = first(card, { "h2 > a[href*='/ranobe/']", "h2 a[href*='/ranobe/']", "h3 > a[href*='/ranobe/']", "h3 a[href*='/ranobe/']", ".title > a[href*='/ranobe/']", ".title a[href*='/ranobe/']" })
+        addNovel(out, seen, textOf(a), attrOf(a, "href"), cardImage(card), "")
+    end
     if #out > 0 then return out, nil end
-    local reason = "no novels parsed: url=" .. tostring(url) .. "; title=" .. textOf(doc:selectFirst("title")); if withDebug then return makeDebugNovel("no novels parsed", reason) end; return {}, reason
+    local reason = "no novels parsed: url=" .. tostring(url) .. "; title=" .. textOf(doc:selectFirst("title")); if withDebug then return makeDebugNovel("no catalog novels", reason) end; return {}, reason
 end
-local function parseListingURL(url) return parseListingURLInternal(url, true, "", false) end
+
+local function parseSearchURL(url, query, withDebug)
+    randomizedDelay(true)
+    local doc, et, em = safeFetch(url, true)
+    if not doc then if withDebug then return makeDebugNovel("fetch failed", "url=" .. tostring(url) .. "; type=" .. tostring(et) .. "; msg=" .. tostring(em)) end; return {}, "fetch failed: " .. tostring(et) .. ": " .. tostring(em) end
+    local root = doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc
+    local out = {}; local seen = {}
+
+    local cards = root:select("article, .shortstory, .rank-story, .block.story, .searchitem, .search-item")
+    for i = 1, cards:size() do
+        local card = cards:get(i - 1)
+        local a = first(card, { "h2 > a[href*='/ranobe/']", "h2 a[href*='/ranobe/']", "h3 > a[href*='/ranobe/']", "h3 a[href*='/ranobe/']", ".title > a[href*='/ranobe/']", ".title a[href*='/ranobe/']", "a[href*='/ranobe/']" })
+        addNovel(out, seen, textOf(a), attrOf(a, "href"), cardImage(card), query)
+    end
+
+    -- Fallback for Ranobes search/filters: real result links may be outside the expected card selectors.
+    local links = root:select("a[href*='/ranobe/']")
+    for i = 1, links:size() do
+        local a = links:get(i - 1)
+        addNovel(out, seen, textOf(a), attrOf(a, "href"), imageURL, query)
+    end
+
+    if #out > 0 then return out, nil end
+    local reason = "no search novels: url=" .. tostring(url) .. "; title=" .. textOf(doc:selectFirst("title")); if withDebug then return makeDebugNovel("no search novels", reason) end; return {}, reason
+end
+
+local function parseListingURL(url) return parseCatalogURL(url, true) end
 local function search(data)
     local raw = queryFromData(data); if raw == "" then return makeDebugNovel("empty query", "Shosetsu did not pass QUERY to extension") end
-    local last = ""
-    for _, url in ipairs(buildSearchURLs(data)) do local novels, reason = parseListingURLInternal(url, false, raw, false); if #novels > 0 then return novels end; last = last .. " | " .. tostring(reason) end
-    return makeDebugNovel("search failed", last)
+    local page = pageFromData(data)
+    local novels, reason = parseSearchURL(searchURL(raw, page), raw, false)
+    if #novels > 0 then return novels end
+    return makeDebugNovel("search failed", tostring(reason))
 end
 
 local function mapStatus(s) s = trim(s); return ({["Активен"] = NovelStatus.PUBLISHING,["Активно"] = NovelStatus.PUBLISHING,["В процессе"] = NovelStatus.PUBLISHING,["Продолжается"] = NovelStatus.PUBLISHING,["Онгоинг"] = NovelStatus.PUBLISHING,["Ongoing"] = NovelStatus.PUBLISHING,["Active"] = NovelStatus.PUBLISHING,["Завершено"] = NovelStatus.COMPLETED,["Завершён"] = NovelStatus.COMPLETED,["Завершена"] = NovelStatus.COMPLETED,["Закончен"] = NovelStatus.COMPLETED,["Закончено"] = NovelStatus.COMPLETED,["Completed"] = NovelStatus.COMPLETED,["Приостановлено"] = NovelStatus.PAUSED,["Заморожено"] = NovelStatus.PAUSED,["Пауза"] = NovelStatus.PAUSED,["Break"] = NovelStatus.PAUSED,["Hiatus"] = NovelStatus.PAUSED})[s] or NovelStatus.UNKNOWN end

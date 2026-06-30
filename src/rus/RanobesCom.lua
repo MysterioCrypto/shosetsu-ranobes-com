@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.0","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.1","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -163,6 +163,28 @@ local function cardImage(card)
     return imageURL
 end
 
+local function urlEncode(str)
+    str = tostring(str or "")
+    str = str:gsub("\n", " ")
+    str = str:gsub("([^%w%-_%.~])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    return str
+end
+
+local function buildFilterURL(data, isSearch)
+    local page = 1
+    if data and data[PAGE] then page = tonumber(data[PAGE]) or 1 end
+
+    if isSearch then
+        local queryContent = ""
+        if data and data[QUERY] then queryContent = urlEncode(data[QUERY]) end
+        return baseURL .. "/f/l.title=" .. queryContent .. "/sort=date/order=desc/page/" .. page
+    end
+
+    return baseURL .. "/f/sort=date/order=desc/page/" .. page
+end
+
 local function parseListingURL(url)
     randomizedDelay(true)
     local document = safeFetch(url)
@@ -191,11 +213,7 @@ local function parseListingURL(url)
 end
 
 local function search(data)
-    local queryContent = data[QUERY]
-    local page = data[PAGE]
-    randomizedDelay(true)
-
-    return parseListingURL(baseURL .. "/search/" .. queryContent .. "/page/" .. page)
+    return parseListingURL(buildFilterURL(data, true))
 end
 
 local function mapStatus(status)
@@ -450,6 +468,9 @@ return {
     chapterType = ChapterType.HTML,
 
     listings = {
+        Listing("Новое", true, function(data)
+            return parseListingURL(buildFilterURL(data, false))
+        end),
         Listing("Популярное", false, function()
             return parseListingURL(baseURL .. "/popular.html")
         end),

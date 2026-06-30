@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.2","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.3","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -97,7 +97,7 @@ local function makeDebugNovel(title, details)
     return {
         Novel({
             title = text,
-            link = "/",
+            link = "/ranobe/",
             imageURL = imageURL
         })
     }
@@ -184,30 +184,73 @@ local function urlEncode(str)
     return str
 end
 
-local function buildFilterURL(data, isSearch)
-    local page = 1
-    if data and data[PAGE] then page = tonumber(data[PAGE]) or 1 end
-
-    if isSearch then
-        local queryContent = ""
-        if data and data[QUERY] then queryContent = urlEncode(data[QUERY]) end
-        return baseURL .. "/f/l.title=" .. queryContent .. "/sort=date/order=desc/page/" .. page
-    end
-
-    return baseURL .. "/f/sort=date/order=desc/page/" .. page
+local function pageFromData(data)
+    if data and data[PAGE] then return tonumber(data[PAGE]) or 1 end
+    return 1
 end
 
-local function parseListingURL(url)
+local function buildCatalogURL(data)
+    local page = pageFromData(data)
+    if page <= 1 then return baseURL .. "/ranobe/" end
+    return baseURL .. "/ranobe/page/" .. page .. "/"
+end
+
+local function buildSearchURLs(data)
+    local page = pageFromData(data)
+    local queryContent = ""
+    if data and data[QUERY] then queryContent = urlEncode(data[QUERY]) end
+
+    if queryContent == "" then
+        return { buildCatalogURL(data) }
+    end
+
+    return {
+        baseURL .. "/ranobe/l.title=" .. queryContent .. "/sort=date/order=desc/page/" .. page .. "/",
+        baseURL .. "/search/" .. queryContent .. "/page/" .. page,
+        baseURL .. "/index.php?do=search&subaction=search&story=" .. queryContent
+    }
+end
+
+local function isNovelHref(href)
+    href = shrinkURL(href)
+    return href:find("^/ranobe/%d+%-") ~= nil and href:find("%.html") ~= nil
+end
+
+local function addNovel(result, seen, title, href, img)
+    title = trim(title)
+    href = trim(href)
+    if title == "" or href == "" then return end
+    if not isNovelHref(href) then return end
+    if title == "Читать" or title == "Закладка" then return end
+
+    local link = shrinkURL(href)
+    if seen[link] then return end
+    seen[link] = true
+
+    table.insert(result, Novel({
+        title = title,
+        link = link,
+        imageURL = img or imageURL
+    }))
+end
+
+local function parseListingURLInternal(url, withDebug)
     randomizedDelay(true)
     local document, errType, errMsg = safeFetch(url, true)
 
     if not document then
-        return makeDebugNovel("fetch failed", "url=" .. tostring(url) .. "; type=" .. tostring(errType) .. "; msg=" .. tostring(errMsg))
+        if withDebug then
+            return makeDebugNovel("fetch failed", "url=" .. tostring(url) .. "; type=" .. tostring(errType) .. "; msg=" .. tostring(errMsg))
+        end
+        return {}, "fetch failed: " .. tostring(errType) .. ": " .. tostring(errMsg)
     end
 
-    local cards = document:select("article.block.story.shortstory.mod-poster, article.shortstory, .shortstory, .rank-story")
+    local novels = {}
+    local seen = {}
 
-    local novels = nodesToList(cards, function(card)
+    local cards = document:select("article.block.story.shortstory.mod-poster, article.shortstory, .shortstory, .rank-story")
+    for i = 1, cards:size() do
+        local card = cards:get(i - 1)
         local titleNode = first(card, {
             "h2 > a[href*='/ranobe/']",
             "h2 a[href*='/ranobe/']",
@@ -215,44 +258,40 @@ local function parseListingURL(url)
             ".title a[href*='/ranobe/']",
             "a[href*='/ranobe/']"
         })
+        addNovel(novels, seen, textOf(titleNode), attrOf(titleNode, "href"), cardImage(card))
+    end
 
-        local title = textOf(titleNode)
-        local href = attrOf(titleNode, "href")
-        if title == "" or href == "" then return nil end
-
-        return Novel({
-            title = title,
-            link = shrinkURL(href),
-            imageURL = cardImage(card)
-        })
-    end)
-
-    if #novels > 0 then return novels end
-
-    -- Fallback: parse any direct novel links. This is intentionally broad because Ranobes changes card markup.
+    -- Fallback: parse any direct novel links. This catches sidebar/top lists and pages with altered card markup.
     local anchors = document:select("a[href*='/ranobe/']")
-    local seen = {}
-    novels = nodesToList(anchors, function(a)
-        local href = attrOf(a, "href")
-        local title = textOf(a)
-        if href == "" or title == "" or seen[href] then return nil end
-        if title == "Читать" or title == "Закладка" then return nil end
-        seen[href] = true
-        return Novel({
-            title = title,
-            link = shrinkURL(href),
-            imageURL = imageURL
-        })
-    end)
+    for i = 1, anchors:size() do
+        local a = anchors:get(i - 1)
+        addNovel(novels, seen, textOf(a), attrOf(a, "href"), imageURL)
+    end
 
-    if #novels > 0 then return novels end
+    if #novels > 0 then return novels, nil end
 
     local pageTitle = textOf(document:selectFirst("title"))
-    return makeDebugNovel("no novels parsed", "url=" .. tostring(url) .. "; title=" .. pageTitle)
+    local reason = "no novels parsed: url=" .. tostring(url) .. "; title=" .. pageTitle
+    if withDebug then return makeDebugNovel("no novels parsed", reason) end
+    return {}, reason
+end
+
+local function parseListingURL(url)
+    local novels = parseListingURLInternal(url, true)
+    return novels
 end
 
 local function search(data)
-    return parseListingURL(buildFilterURL(data, true))
+    local urls = buildSearchURLs(data)
+    local lastReason = ""
+
+    for _, url in ipairs(urls) do
+        local novels, reason = parseListingURLInternal(url, false)
+        if #novels > 0 then return novels end
+        lastReason = lastReason .. " | " .. tostring(reason)
+    end
+
+    return makeDebugNovel("search failed", lastReason)
 end
 
 local function mapStatus(status)
@@ -505,11 +544,11 @@ return {
     chapterType = ChapterType.HTML,
 
     listings = {
+        Listing("Ранобэ", true, function(data)
+            return parseListingURL(buildCatalogURL(data))
+        end),
         Listing("Главная", false, function()
             return parseListingURL(baseURL .. "/")
-        end),
-        Listing("Новое", true, function(data)
-            return parseListingURL(buildFilterURL(data, false))
         end),
         Listing("Популярное", false, function()
             return parseListingURL(baseURL .. "/popular.html")

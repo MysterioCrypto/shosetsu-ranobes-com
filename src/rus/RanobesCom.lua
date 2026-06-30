@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.11","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.12","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -203,10 +203,13 @@ local function searchURLs(query, page)
         table.insert(urls, baseURL .. "/search/" .. enc .. "/page/" .. page)
         table.insert(urls, baseURL .. "/search/" .. query .. "/page/" .. page)
         table.insert(urls, baseURL .. "/f/cat=1/l.title=" .. enc .. "/sort=date/order=desc/page/" .. page .. "/")
+        table.insert(urls, baseURL .. "/index.php?do=search&subaction=search&search_start=" .. page .. "&full_search=0&result_from=" .. tostring(((page - 1) * 10) + 1) .. "&story=" .. enc)
     else
         table.insert(urls, baseURL .. "/search/" .. enc .. "/page/1")
         table.insert(urls, baseURL .. "/search/" .. query .. "/page/1")
         table.insert(urls, baseURL .. "/f/cat=1/l.title=" .. enc .. "/sort=date/order=desc/")
+        table.insert(urls, baseURL .. "/index.php?do=search&subaction=search&story=" .. enc)
+        table.insert(urls, baseURL .. "/index.php?do=search&subaction=search&search_start=1&full_search=0&result_from=1&story=" .. enc)
     end
     return urls
 end
@@ -219,18 +222,22 @@ local function parseListingURL(url)
     return parseCards(root, "")
 end
 
+local function parseSearchURL(url, query)
+    waitBeforeRequest(true)
+    local doc = safeFetch(url, true)
+    if not doc then return {} end
+    local root = doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc
+    -- URL already contains the query; do not filter twice. This avoids empty results if Shosetsu passes an encoded query.
+    return parseCards(root, "")
+end
+
 local function search(data)
     local q = queryFromData(data)
     if q == "" then return {} end
     local urls = searchURLs(q, pageFromData(data))
     for _, url in ipairs(urls) do
-        waitBeforeRequest(true)
-        local doc = safeFetch(url, true)
-        if doc then
-            local root = doc:selectFirst("#dle-content") or doc:selectFirst("main") or doc
-            local out = parseCards(root, q)
-            if #out > 0 then return out end
-        end
+        local out = parseSearchURL(url, q)
+        if #out > 0 then return out end
     end
     return {}
 end
@@ -304,6 +311,23 @@ local function getNumberFromSpec(doc, labels)
     return extractNumber(findSpecValue(doc, labels)) or 0
 end
 
+local function collectLinks(root, selectors)
+    local result = {}
+    local seen = {}
+    if not root then return result end
+    for _, selector in ipairs(selectors) do
+        local nodes = root:select(selector)
+        for i = 1, nodes:size() do
+            local t = textOf(nodes:get(i - 1))
+            if t ~= "" and not seen[t] then
+                seen[t] = true
+                table.insert(result, t)
+            end
+        end
+    end
+    return result
+end
+
 local function findChapterIndexUrl(doc, novelURL)
     local links = doc:select("a")
     for i = 1, links:size() do
@@ -359,18 +383,26 @@ local function parseNovel(novelURL, loadChapters)
     if imgURL == "" then imgURL = imageURL end
     local desc = htmlToString(first(doc, { ".moreless.cont-text.showcont-h", ".cont-text.showcont-h", ".full-text", "#dle-content .text" }))
 
-    local genres = {}
-    local g = doc:select("a[href*='/genres/']")
-    for i = 1, g:size() do local t = textOf(g:get(i - 1)); if t ~= "" then table.insert(genres, t) end end
+    local genres = collectLinks(doc, {
+        "#mc-fs-genre div.links a",
+        "#mc-fs-genre a",
+        "a[href*='/genres/']",
+        "a[href*='/genre/']"
+    })
 
-    local authors = {}
-    local an = doc:select("a[href*='/authors/']")
-    if an:size() == 0 then an = doc:select("a[href*='/author/']") end
-    for i = 1, an:size() do local t = textOf(an:get(i - 1)); if t ~= "" then table.insert(authors, t) end end
+    local authors = collectLinks(doc, {
+        ".tag_list a",
+        "a[href*='/authors/']",
+        "a[href*='/author/']"
+    })
 
-    local tags = {}
-    local tn = doc:select("a[href*='/tags/']")
-    for i = 1, tn:size() do local t = textOf(tn:get(i - 1)); if t ~= "" then table.insert(tags, t) end end
+    local tags = collectLinks(doc, {
+        "#mc-fs-tags a",
+        ".tags a",
+        "a[href*='/tags/']",
+        "a[href*='/tag/']",
+        ".cont-in .cont-text.showcont-h a"
+    })
 
     local info = NovelInfo({
         title = title,
@@ -434,6 +466,12 @@ return {
             local q = queryFromData(data)
             if q ~= "" then return search(data) end
             return parseListingURL(catalogURL(data))
+        end),
+        Listing("Diag: /search повелитель", false, function()
+            return parseSearchURL(baseURL .. "/search/" .. urlEncode("повелитель") .. "/page/1", "")
+        end),
+        Listing("Diag: /f повелитель", false, function()
+            return parseSearchURL(baseURL .. "/f/cat=1/l.title=" .. urlEncode("повелитель") .. "/sort=date/order=desc/", "")
         end),
         Listing("Главная", false, function() return parseListingURL(baseURL .. "/") end),
         Listing("Популярное", false, function() return parseListingURL(baseURL .. "/popular.html") end),

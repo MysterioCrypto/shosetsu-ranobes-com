@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.1","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.2","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -91,6 +91,18 @@ local function concatLists(list1, list2)
     return list1
 end
 
+local function makeDebugNovel(title, details)
+    local text = "DEBUG: " .. tostring(title or "unknown")
+    if details and details ~= "" then text = text .. " — " .. tostring(details) end
+    return {
+        Novel({
+            title = text,
+            link = "/",
+            imageURL = imageURL
+        })
+    }
+end
+
 local function htmlToString(text)
     text = tostring(text or "")
     text = text:gsub(">%s+<", "><")
@@ -136,7 +148,7 @@ local function safeFetch(url, soft)
         or bodyText:find("подозрительную активность")
         or bodyText:find("Ranobes Flood Guard")
     then
-        if soft then return false, "captcha", "CAPTCHA detected." end
+        if soft then return false, "captcha", "CAPTCHA detected. title=" .. title end
         error("CAPTCHA detected. Use WebView to bypass. (or a Browser)")
     end
 
@@ -187,11 +199,15 @@ end
 
 local function parseListingURL(url)
     randomizedDelay(true)
-    local document = safeFetch(url)
+    local document, errType, errMsg = safeFetch(url, true)
+
+    if not document then
+        return makeDebugNovel("fetch failed", "url=" .. tostring(url) .. "; type=" .. tostring(errType) .. "; msg=" .. tostring(errMsg))
+    end
 
     local cards = document:select("article.block.story.shortstory.mod-poster, article.shortstory, .shortstory, .rank-story")
 
-    return nodesToList(cards, function(card)
+    local novels = nodesToList(cards, function(card)
         local titleNode = first(card, {
             "h2 > a[href*='/ranobe/']",
             "h2 a[href*='/ranobe/']",
@@ -210,6 +226,29 @@ local function parseListingURL(url)
             imageURL = cardImage(card)
         })
     end)
+
+    if #novels > 0 then return novels end
+
+    -- Fallback: parse any direct novel links. This is intentionally broad because Ranobes changes card markup.
+    local anchors = document:select("a[href*='/ranobe/']")
+    local seen = {}
+    novels = nodesToList(anchors, function(a)
+        local href = attrOf(a, "href")
+        local title = textOf(a)
+        if href == "" or title == "" or seen[href] then return nil end
+        if title == "Читать" or title == "Закладка" then return nil end
+        seen[href] = true
+        return Novel({
+            title = title,
+            link = shrinkURL(href),
+            imageURL = imageURL
+        })
+    end)
+
+    if #novels > 0 then return novels end
+
+    local pageTitle = textOf(document:selectFirst("title"))
+    return makeDebugNovel("no novels parsed", "url=" .. tostring(url) .. "; title=" .. pageTitle)
 end
 
 local function search(data)
@@ -392,7 +431,6 @@ local function parseNovel(novelURL, loadChapters)
 
     local viewCount = getNumberFromSpec(document, { "Просмотров", "Просмотры" })
     local commentCount = getNumberFromSpec(document, { "Комментариев", "Комментарии" })
-    local chapterCount = getChapterCount(document)
     local chapterIndexUrl = ensureTrailingSlash(findChapterIndexUrl(document, fullURL))
 
     local info = NovelInfo {
@@ -431,7 +469,6 @@ local function parseNovel(novelURL, loadChapters)
                 end
             end
         else
-            -- If CAPTCHA or temporary error appears while loading chapters, return metadata without chapters.
             chapters = {}
         end
 
@@ -468,6 +505,9 @@ return {
     chapterType = ChapterType.HTML,
 
     listings = {
+        Listing("Главная", false, function()
+            return parseListingURL(baseURL .. "/")
+        end),
         Listing("Новое", true, function(data)
             return parseListingURL(buildFilterURL(data, false))
         end),

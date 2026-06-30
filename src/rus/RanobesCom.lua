@@ -1,4 +1,4 @@
--- {"id":962041,"ver":"1.0.5","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
+-- {"id":962041,"ver":"1.0.6","libVer":"1.0.0","author":"MysterioCrypto","dep":[]}
 
 local baseURL = "https://ranobes.com"
 local imageURL = "https://github.com/bigrand/shosetsu-extensions/raw/master/icons/ranobes.png"
@@ -61,6 +61,12 @@ local function cleanTitle(title)
     title = trim(title)
     title = title:gsub("%s+Более%s+[%d%s]+%s+просмотров.*$", "")
     title = title:gsub("%s+Китайский;.*$", ""):gsub("%s+Корейский;.*$", ""):gsub("%s+Японский;.*$", ""):gsub("%s+Английский;.*$", ""):gsub("%s+Русский;.*$", "")
+    return trim(title)
+end
+local function cleanChapterTitle(title)
+    title = trim(title)
+    title = title:gsub("%s+%d%d?%s+[А-Яа-яЁё]+%s+%d%d%d%d%s+в.*$", "")
+    title = title:gsub("%s+%d%d?%s+[А-Яа-яЁё]+%s+%d%d%d%d.*$", "")
     return trim(title)
 end
 
@@ -156,7 +162,7 @@ local function getLastPage(doc) local max = 1; local links = doc:select("a[href*
 local function chapterOrder(title, href, fallback) local n = title:match("[Гг]лава%s*([%d%.]+)") or title:match("[Чч]асть%s*([%d%.]+)") or title:match("[Cc]hapter%s*([%d%.]+)") or href:match("/(%d+)%-"); return tonumber(n) or fallback end
 local function parseChapters(doc)
     local root = doc:selectFirst("#dle-content") or doc; local links = root:select("a[href*='/chapters/']"); local out = {}; local seen = {}
-    for i = links:size(), 1, -1 do local a = links:get(i - 1); local href = attrOf(a, "href"); local title = textOf(a); if href:find("/chapters/") and href:find("%.html") and title ~= "" and not seen[href] then seen[href] = true; table.insert(out, NovelChapter({ order = chapterOrder(title, href, #out + 1), title = title, link = shrinkURL(href) })) end end
+    for i = links:size(), 1, -1 do local a = links:get(i - 1); local href = attrOf(a, "href"); local title = cleanChapterTitle(textOf(a)); if href:find("/chapters/") and href:find("%.html") and title ~= "" and not seen[href] then seen[href] = true; table.insert(out, NovelChapter({ order = chapterOrder(title, href, #out + 1), title = title, link = shrinkURL(href) })) end end
     return out
 end
 
@@ -186,6 +192,7 @@ return {
     chapterType = ChapterType.HTML,
     listings = {
         Listing("Ранобэ", true, function(data) local q = queryFromData(data); if q ~= "" then return search(data) end; return parseListingURL(buildCatalogURL(data)) end),
+        Listing("Тест: повелитель", false, function() return search({ query = "повелитель" }) end),
         Listing("Главная", false, function() return parseListingURL(baseURL .. "/") end),
         Listing("Популярное", false, function() return parseListingURL(baseURL .. "/popular.html") end),
     },
